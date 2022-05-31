@@ -4,9 +4,9 @@
 ###################################################
 
 ## This script presents the template for the simulation and analysis of SCR data
-## based on different german ungulate characteristics. This particular simulation 
-## mimicks a population with a specific age- and sex- composition and variable
-## corresponding space-use patterns (represented by variable sigma/p0 
+## based on different ungulate populations characteristics.
+## This particular simulation mimicks a population with a specific age- and sex-
+## composition and corresponding space-use patterns (represented by variable sigma/p0 
 ## parameters of the half-normal detection function.
 rm(list=ls())
 gc()
@@ -16,6 +16,7 @@ gc()
 library(rgdal)
 library(rgeos)
 library(raster)
+library(nimble)
 library(nimbleSCR)
 library(abind)
 library(coda)
@@ -26,40 +27,25 @@ library(plotrix)
 library(extraDistr)
 
 
+
 ## ------ WORKING DIRECTORIES ------
-source(file.path(getwd(),"Temp/PD/myWorkingDirectories.R"))             
-WD <- file.path(dir.projects,"GERMAN UNGULATES/SIMULATION_STUDY")
-path.IN <- file.path(WD,"SIMULATIONS/InFiles")
-path.OUT <- file.path(WD,"SIMULATIONS/OutFiles2")
+WD <- file.path("C:/Users/pidu/OneDrive - Norwegian University of Life Sciences/PROJECTS/SIMULATION_STUDY")
+dir.create(WD)
+path.IN <- file.path(WD, "InFiles")
+dir.create(path.IN)
+path.OUT <- file.path(WD, "OutFiles")
+dir.create(path.OUT)
 
 
 ## ------ FUNCTIONS ------
-sourceDirectory(dir.function, modifiedOnly = FALSE)
-source(file.path(getwd(),"Temp/WZ/ppSCR_Code_Cleaned/dbernPPAC.R"))
-source(file.path(getwd(),"Temp/WZ/ppSCR_Code_Cleaned/integrateIntensity_normal.R"))
-source(file.path(getwd(),"Temp/WZ/ppSCR_Code_Cleaned/calcWindowSizes.R"))
-source(file.path(getwd(),"Temp/WZ/ppSCR_Code_Cleaned/getWindowIndex.R"))
-source(file.path(getwd(),"Temp/WZ/ppSCR_Code_Cleaned/stratRejectionSampler_normal.R"))
-source(file.path(getwd(),"Temp/WZ/ppSCR_Code_Cleaned/dpoisppDetection_normal.R"))
-source(file.path(getwd(),"Temp/WZ/ppSCR_Code_Cleaned/integrateIntensityLocal_normal.R"))
-source(file.path(getwd(),"Temp/WZ/ppSCR_Code_Cleaned/dpoisppLocalDetection_normal.R"))
-source(file.path(getwd(),"Temp/WZ/ppSCR_Code_Cleaned/dpoisppAC.R"))
-source(file.path(getwd(),"Temp/WZ/ppSCR_Code_Cleaned/dnormalizer.R"))
-source(file.path(getwd(),"Temp/WZ/ppSCR_Code_Cleaned/midPointNodes.R"))
-source(file.path(getwd(),"Temp/WZ/ppSCR_Code_Cleaned/marginalVoidProbIntegrand.R"))
-source(file.path(getwd(),"Temp/WZ/ppSCR_Code_Cleaned/marginalVoidProbNumIntegration.R"))
-
-source(file.path(getwd(),"Temp/PD/FUNCTIONS/FunctionScripts/wildMap.R"))
-myCols <- wildMap(8)
-rgb.col <- col2rgb(myCols)/255
-colors <- rgb(rgb.col[1,], rgb.col[2,], rgb.col[3,], 0.9)
-
+sourceDirectory(file.path(WD, "functions"),
+                modifiedOnly = FALSE)
 
 
 ## -----------------------------------------------------------------------------
 ## ------   1. SET SIMULATION CHARACTERISTICS ------
 ## Load parameter space
-parm.df <- read.csv2( file = file.path(WD, "SIMULATIONS/PARAM.SPACE/param.space.csv"),
+parm.df <- read.csv2( file = file.path(WD, "PARAM.SPACE/param.space.csv"),
                       header = T, sep = ",", dec = ".")
 
 temp <- MakeParameterSpace(list.param = list("Grouping" = c(FALSE, TRUE),
@@ -67,7 +53,7 @@ temp <- MakeParameterSpace(list.param = list("Grouping" = c(FALSE, TRUE),
                                              "Adaptive" = c(FALSE, TRUE),
                                              "searchEffort" = c("high","low"),
                                              "species" = c("chamois","red_deer","wild_boar")),
-                           n.rep = 100)
+                           n.rep = 1)
 parm.df <- merge(temp, parm.df, by = "species")
 
 ## Assign scenario number to each simulation
@@ -82,10 +68,7 @@ for(s in 1:nrow(parm.df)){
 changeSpecies <- unlist(lapply(unique(parm.df$species),function(x)min(which(parm.df$species == x))))
 
 
-#pdf(file = file.path(WD, "sim_overview_1.pdf"), width = 20, height = 15)
-#par(mfrow = c(2,4))
 for(sim in 1:nrow(parm.df)){
-  
   ## Set study area characteristics
   species <- parm.df$species[sim]
   site <- parm.df$site[sim]
@@ -97,7 +80,7 @@ for(sim in 1:nrow(parm.df)){
   scenario <- parm.df$scenario[sim]
   
   ## Set population characteristics
-  pop.space <- read.csv2( file = file.path(WD, "SIMULATIONS/PARAM.SPACE/",
+  pop.space <- read.csv2( file = file.path(WD, "PARAM.SPACE/",
                                            paste0(species, ".csv")),
                           header = T, sep = ",", dec = ".")
   numGroups <- nrow(pop.space)
@@ -113,16 +96,15 @@ for(sim in 1:nrow(parm.df)){
   ## SIMULATE A NEW HABITAT ONLY ONCE PER SPECIES TO SAVE TIME
   if(sim %in% changeSpecies){
     ## ------     1.1. STUDY AREA ------
-    studyArea <- readOGR(file.path(WD, "DATA/GIS", site, habitatFile))
-    #plot(studyArea, col = "gray60")
-    
+    studyArea <- readOGR(file.path(WD, "PARAM.SPACE/StudyArea.shp"))
+    plot(studyArea, col = "gray60")
     
     
     ## ------     1.2. DETECTORS ------
-    searchTracks <- readOGR(file.path(WD, "DATA/GIS", site, detectorFile))
+    searchTracks <- readOGR(file.path(WD, "PARAM.SPACE/Transects.shp"))
     searchTracks <- spTransform(searchTracks, CRSobj = proj4string(studyArea))
     searchTracks <- gSimplify(searchTracks, tol = 50)
-    #plot(searchTracks, add = T, col = "firebrick3")
+    plot(searchTracks, add = T, col = "firebrick3")
     
     detectors <- MakeSearchGrid( data = searchTracks,
                                  resolution = detectorRes,
@@ -134,7 +116,6 @@ for(sim in 1:nrow(parm.df)){
     numDetectors <- dim(detCoords)[1]
     
     
-    
     ## ------     1.3. HABITAT ------
     ## CREATE POLYGON OF SUITABLE HABITAT
     ## by considering a buffer of 3*max(sigma) around the search tracks
@@ -142,14 +123,14 @@ for(sim in 1:nrow(parm.df)){
     habPoly <- gBuffer(spgeom = searchTracks, width = 3*max(sigma, na.rm = T))
     habPoly <- union(habPoly, studyArea)
     habPoly <- aggregate(habPoly)
-    #plot(habPoly, add = T, col = adjustcolor("forestgreen", alpha.f = 0.3))
+    plot(habPoly, add = T, col = adjustcolor("forestgreen", alpha.f = 0.3))
     
     habArea <- gArea(habPoly)/1e6
     
     ## CREATE A RASTER OF SUITABLE HABITAT
     habRaster <- raster(extent(habPoly), resolution = habitatRes)
     habRaster <- rasterize(habPoly, habRaster)
-    #plot(habRaster, add = T, col = adjustcolor("forestgreen", alpha.f = 0.3))
+    plot(habRaster, add = T, col = adjustcolor("forestgreen", alpha.f = 0.3))
     
     ## CREATE A MATRIX OF SUITABLE HABITAT
     habMatrix <- as.matrix(habRaster)
@@ -185,7 +166,7 @@ for(sim in 1:nrow(parm.df)){
     
     
     
-    ## ------     1.5. LESS APPROACH ------
+    ## ------     1.5. LOCAL EVALUATION APPROACH ------
     localDetectors <- getLocalObjects( habitatMask = habMatrix,
                                        coords = scaledDetCoords,
                                        dmax = 4*max(sigma, na.rm = T)/habitatRes,
@@ -339,7 +320,6 @@ for(sim in 1:nrow(parm.df)){
   y <- do.call(rbind, lapply(1:sim.N,
                              function(i){
                                p0i <- ilogit(logit(idP0[i]) + betaP0*adSampInt)
-                               # p0i <- 1-(1-idP0[i])^adaptiveSamplingIntensity
                                pi <- p0i*UD[i, ]
                                yi <- rbinom(n = length(pi), size = 1, prob = pi)
                                return(yi)
@@ -350,7 +330,7 @@ for(sim in 1:nrow(parm.df)){
   
   ## ------     2.6. PLOT CHECK ------  
   if(sim %in% changeSpecies){
-    my.col <- matrix(wildMap(11)[c(1,2,3,5,6,7,9,10,11)],
+    my.col <- matrix(terrain.colors(11)[c(1,2,3,5,6,7,9,10,11)],
                      nrow = 3, ncol = 3, byrow = T)
     rgb.col <- col2rgb(my.col)/255
     my.colors <- matrix(rgb(rgb.col[1,], rgb.col[2,], rgb.col[3,], 0.3),
@@ -366,7 +346,7 @@ for(sim in 1:nrow(parm.df)){
            col = my.colors[idGroupType[i],idStatus[i]])
   }#i
 
-  levels <- unique(paste0(idGroupType,".",idStatus))#1,max(groupSize),3)
+  levels <- unique(paste0(idGroupType,".",idStatus))
   legend( x = 592000, y = 5656000, bty = "n",
           legend = levels,
           title = "id status",
@@ -414,12 +394,9 @@ for(sim in 1:nrow(parm.df)){
   
   
   ## Number of ids detected per detector
-  #plot(density, colSums(y), ylab = "num.ids detected/detector")
   numIdsPerDet <- mean(colSums(y))
   
   ## Number of detections per individual
-  #hist(rowSums(y), main = "num. detections/ids")
-  #table(rowSums(y))
   numDetsPerId <- mean(rowSums(y))
   
   ## % of individuals detected
@@ -576,7 +553,7 @@ for(sim in 1:nrow(parm.df)){
   
   
   ## ------     3.5. DEFINE NIMBLE PARAMETERS ------
-  nimParams <- c( "N", "sigma", "p0", "psi", "sexRatio","sxy", "z")
+  nimParams <- c( "N", "sigma", "p0", "psi", "sexRatio","s", "z")
   
   
   
@@ -599,88 +576,21 @@ for(sim in 1:nrow(parm.df)){
   thisFileName <- paste( "NimbleInFile_Set", parm.df$set_ID[sim],
                          "_Rep", parm.df$rep_ID[sim],
                          ".RData", sep = "")
-  # save( nimModel,
-  #       nimData,
-  #       nimConstants,
-  #       nimInits,
-  #       nimParams,
-  #       paramspace,
-  #       exp.compo,
-  #       sim.compo,
-  #       file = file.path(path.IN, thisFileName))
-  # print(sim)
+  save( nimModel,
+        nimData,
+        nimConstants,
+        nimInits,
+        nimParams,
+        paramspace,
+        exp.compo,
+        sim.compo,
+        file = file.path(path.IN, thisFileName))
+  print(sim)
 }#sim
-# graphics.off()
-# save(parm.df, file = file.path(WD, "SIMULATIONS/parm.df.RData"))
-# load(file.path(WD, "SIMULATIONS/parm.df.RData"))
-# parm.df
-
 
 
 ## -----------------------------------------------------------------------------
-## ------   4. SIMULATION PLOT CHECK ------
-{
-  load(file.path(WD, "SIMULATIONS/parm.df.RData"))
-  graphics.off()
-  pdf(file = file.path(WD, "SIMULATIONS/sim_overview.pdf"),
-      width = 15, height = 8)
-  
-  species <- unique(parm.df$species)
-  scenarios <- 1:8
-  valNoise <- seq(-0.35,0.35, length.out = 8)
-  par(mfrow = c(1,2))
-  
-  variables <- c("propDet", "numDetsPerId", "numIdsPerDet", "numDetTot",
-                 "sim.N", "sim.D", "sim.SR")
-  
-  for(this.var in variables){
-    ylim <- range(parm.df[ ,this.var])
-    ylim <- ylim + c(-ylim[1]*0.2, ylim[2]*0.2)
-    
-    for(se in c("high", "low")){
-      plot(1,1, xlim = c(0.5,3.5), ylim = ylim,
-           type = "n", xaxt = "n", main = se,
-           ylab = this.var, xlab = "", axes = F)
-      axis(1, at = 1:3, labels = c("Chamois","Red Deer", "Wild boar"))
-      axis(2,
-           at = round(seq(ylim[1],ylim[2],length.out = 5),2),
-           labels = round(seq(ylim[1],ylim[2],length.out = 5),2))
-      polygon(x = c(1.5,1.5,2.5,2.5),
-              y = c(ylim[1],ylim[2],ylim[2],ylim[1]),
-              border = F, col = adjustcolor("gray80", alpha.f = 0.2))
-      abline(h = 0, lty = 2, lwd = 2)
-      abline(v = 1.5, lty = 2, lwd = 1)
-      abline(v = 2.5, lty = 2, lwd = 1)
-      
-      for(sp in 1:length(species)){
-        for(sc in scenarios){
-          temp <- parm.df[parm.df$species == species[sp] &
-                            parm.df$scenario == sc  &
-                            parm.df$searchEffort == se, this.var]
-          
-          try(plot.violins2( dat.list = list(temp),
-                             x = sp + valNoise[sc],
-                             at = sp + valNoise[sc],
-                             add = T,
-                             col = myCols[sc],
-                             violin.width = 0.05,
-                             alpha = 0.9,
-                             border.col = myCols[sc],
-                             scale.width = F), silent = F)
-        }#sc
-      }#sp
-    }#se
-    legend(x = 2.8, y = ylim[2],
-           legend = c("m0", "G", "H", "GH", "A", "GA", "HA", "GHA"),
-           fill = colors)
-  }#this.var
-  graphics.off()
-  
-}#--- DO ALL
-
-
-## -----------------------------------------------------------------------------
-## ------   5. RUN THE MODEL ------
+## ------   4. RUN THE MODEL ------
 inFiles <- list.files(path.IN)
 for(m in 1:length(inFiles)){
   load(file.path(path.IN, inFiles[m]))
@@ -701,150 +611,32 @@ for(m in 1:length(inFiles)){
   cMCMC <- compileNimble(MCMC, project = Rmodel, resetFunctions = TRUE)
   MCMCRuntime <- system.time(nimOutput <- runMCMC(
     mcmc = cMCMC,
-    nburnin = 1000,
-    niter = 6000,
-    nchains = 3,
+    nburnin = 0,
+    niter = 1000,
+    nchains = 1,
     samplesAsCodaMCMC = TRUE))
   MCMCRuntime
-  plot(nimOutput)
-  
+
   save(nimOutput, MCMCRuntime,
        file = file.path(path.OUT, paste0("OutFor", inFiles[m])))
 }#m
 
 
-## -----------------------------------------------------------------------------
-## ------   6. DEBUGGING (IF NEEDED) ------
-# for(i in 1:nimConstants$n.individuals){
-#   ## if at least one detection
-#   if(nimData$detNums[i] > 0){
-#     ## get s from either data or initial values
-#     s <- nimInits$s[i, ]
-# 
-#     ## get the ID of the habitat cell sxy falls in
-#     sID <- nimData$resizeHabGrid[trunc(s[2]/nimConstants$resizeFactor)+1,
-#                                  trunc(s[1]/nimConstants$resizeFactor)+1]
-# 
-#     ## get the asssociated allowed detectors
-#     index <- nimData$localTrapsIndices[sID,1:nimData$localTrapsNum[sID]]
-# 
-#     ## get the number of asssociated detectors
-#     n.detectors <- length(index)
-# 
-#     ## get the ID of the detectors where the individual was actually detected
-#     YDET <- nimData$detIndices[i,nimData$detIndices[i, ] > 0]
-# 
-#     for(j in 1:nimData$detNums[i]){
-#       ## check if any detections happened outside the allowed detectors
-#       if(sum(YDET[j] == index) == 0){
-#         print(paste("id",i,"j",j))
-#         plot(nimData$trapCoords[ ,2] ~ nimData$trapCoords[ ,1])
-#         points(nimData$trapCoords[index,2] ~ nimData$trapCoords[index,1], col = "red")
-#         points(s[2] ~ s[1], col = "blue", pch = 16)
-#         points(nimData$trapCoords[YDET,2] ~ nimData$trapCoords[YDET,1], col = "green", pch=16)
-#       }#if
-#     }#j
-#   }#if
-# }#i
-# 
-# 
-# 
-# 
-# i <- 147
-# 
-# dbinom_sparseLocalSCR(
-#   x = nimData$y[i, ],
-#   detNums = nimData$detNums[i],
-#   detIndices = nimData$detIndices[i, ],
-#   size = nimData$trials,
-#   p0 = Rmodel$p0,
-#   sigma = Rmodel$sigma,
-#   s = Rmodel$s[i, ],
-#   trapCoords = nimData$trapCoords,
-#   localTrapsIndices = nimData$localTrapsIndices,
-#   localTrapsNum = nimData$localTrapsNum,
-#   resizeFactor = nimConstants$resizeFactor,
-#   habitatGrid = nimData$resizeHabGrid,
-#   indicator = Rmodel$z[i],
-#   log = 1)
-# 
-# sID <- nimData$resizeHabGrid[ trunc(Rmodel1$s[i,2]/nimConstants$resizeFactor) + 1,
-#                        trunc(Rmodel1$s[i,1]/nimConstants$resizeFactor) + 1]
-# 
-# nimData$localTrapsIndices[sID, ]
-
 
 ## -----------------------------------------------------------------------------
-## ------   7. PROCESS OUTPUTS -----
-load(file.path(WD, "SIMULATIONS/parm.df.RData"))
+## ------   5. PLOT RESULTS -----
+load(file.path(WD, "parm.df.RData"))
+load(file.path(WD, "results.RData"))
 
-inFiles <- list.files(path.IN)
-outFiles <- list.files(path.OUT)[grep("NimbleOutFOR", list.files(path.OUT))]
-ref <- expand.grid(list(G = c(F,T), H = c(F,T), A = c(F,T)))
-for(s in 1:nrow(parm.df)){
-  parm.df$scenario[s] <- which(ref$G == parm.df$Grouping[s] &
-                                 ref$H == parm.df$Heterogeneity[s] &
-                                 ref$A == parm.df$Adaptive[s])
-}#s
+myCols <- terrain.colors(8)
+rgb.col <- col2rgb(myCols)/255
+colors <- rgb(rgb.col[1,], rgb.col[2,], rgb.col[3,], 0.3)
 
-
-## PROCESS OUTPUTS
-myParams <- c("N","psi","sexRatio")
-
-myResults <- list()
-for(p in 1:length(myParams)){
-  myResults[[p]] <- parm.df
-  myResults[[p]]$mean <- rep(NA, nrow(parm.df))
-  myResults[[p]]$lci <- rep(NA, nrow(parm.df))
-  myResults[[p]]$uci <- rep(NA, nrow(parm.df))
-  myResults[[p]]$sd <- rep(NA, nrow(parm.df))
-  myResults[[p]]$CV <- rep(NA, nrow(parm.df))
-  myResults[[p]]$Rhat <- rep(NA, nrow(parm.df))
-}#p
-
-n.rep <- max(parm.df$rep_ID)
-n.set <- max(parm.df$set_ID)
-for(s in 1:n.set){
-  repCount <- 0
-  for(r in 1:n.rep){
-    fileName <- paste0("proc_NimbleOutFORNimbleInFile_Set",s,"_Rep",r,".RData")
-    if(fileName %in% outFiles){
-      load(file.path(path.OUT, fileName))
-      if(all(na.omit(unlist(nimOutput$Rhat)) <= 1.1) & !is.na(any(unlist(nimOutput$Rhat) > 1.1)) ){
-        repCount <- repCount + 1
-        for(p in 1:length(myParams)){
-          myResults[[p]]$mean[myResults[[p]]$set_ID == s & 
-                                myResults[[p]]$rep_ID == r] <- nimOutput$mean[[myParams[p]]]
-          myResults[[p]]$lci[myResults[[p]]$set_ID == s &
-                               myResults[[p]]$rep_ID == r] <- nimOutput$q2.5[[myParams[p]]]
-          myResults[[p]]$uci[myResults[[p]]$set_ID == s &
-                               myResults[[p]]$rep_ID == r] <- nimOutput$q97.5[[myParams[p]]]
-          myResults[[p]]$sd[myResults[[p]]$set_ID == s &
-                              myResults[[p]]$rep_ID == r] <- nimOutput$sd[[myParams[p]]]
-          myResults[[p]]$CV[myResults[[p]]$set_ID == s &
-                              myResults[[p]]$rep_ID == r] <- nimOutput$sd[[myParams[p]]]/nimOutput$mean[[myParams[p]]]
-          myResults[[p]]$Rhat[myResults[[p]]$set_ID == s &
-                                myResults[[p]]$rep_ID == r] <- nimOutput$Rhat[[myParams[p]]]
-          
-        }#p
-      }
-    }#if
-  }#r
-  print(paste0("Set: ", s, " == ", repCount, " repetitions"))
-}#s
-save(myResults, file = file.path(WD, "SIMULATIONS/results.RData"))
-
-
-
-## -----------------------------------------------------------------------------
-## ------   8. PLOT RESULTS -----
-load(file.path(WD, "SIMULATIONS/parm.df.RData"))
-load(file.path(WD, "SIMULATIONS/results.RData"))
 
 ## PLOTS N
 { 
   graphics.off()
-  pdf(file = file.path(WD, "SIMULATIONS/results_N.pdf"),
+  pdf(file = file.path(WD, "results_N.pdf"),
       width = 15, height = 8)
   
   species <- unique(parm.df$species)
@@ -969,7 +761,7 @@ load(file.path(WD, "SIMULATIONS/results.RData"))
 ## PLOTS Sex Ratio
 { 
   graphics.off()
-  pdf(file = file.path(WD, "SIMULATIONS/results_SR.pdf"), width = 15, height = 8)
+  pdf(file = file.path(WD, "results_SR.pdf"), width = 15, height = 8)
   
   species <- unique(parm.df$species)
   scenarios <- 1:8
@@ -1090,235 +882,4 @@ load(file.path(WD, "SIMULATIONS/results.RData"))
 }
 
 
-
-## -----------------------------------------------------------------------------
-## ------   9. FIGURES REPORT/ARTICLE -----
-load(file.path(WD, "SIMULATIONS/parm.df.RData"))
-load(file.path(WD, "SIMULATIONS/results.RData"))
-## PLOTS N
-{ 
-  graphics.off()
-  pdf(file = file.path(WD, "SIMULATIONS/figure_N.pdf"),
-      width = 10, height = 3.5)
-  
-  species <- unique(parm.df$species)
-  scenarios <- 1:8
-  valNoise <- seq(-0.35,0.35, length.out = 8)
-  par(mfrow = c(1,3))
-  
-  ## RELATIVE BIAS
-    ylim <- 0.5
-    plot(1,1, xlim = c(0.5,3.5), ylim = c(-ylim,ylim),
-         type = "n", xaxt = "n", main = "Relative bias",
-         ylab = "RB(N)", xlab = "", axes = F)
-    axis(1, at = 1:3, labels = c("Chamois","Red Deer", "Wild boar"))
-    axis(2,
-         at = seq(-ylim,ylim,length.out = 5),
-         labels = seq(-ylim,ylim,length.out = 5))
-    # polygon(x = c(1.5,1.5,2.5,2.5),
-    #         y = c(-(ylim+1),ylim+1,ylim+1,-(ylim+1)),
-    #         border = F, col = adjustcolor("gray80", alpha.f = 0.2))
-    abline(h = 0, lty = 2, lwd = 2)
-    abline(v = 1.5, lty = 2, lwd = 1)
-    abline(v = 2.5, lty = 2, lwd = 1)
-    
-    p <- 1
-    for(sp in 1:length(species)){
-      for(sc in scenarios){
-        temp <- myResults[[p]][myResults[[p]]$species == species[sp] &
-                                 myResults[[p]]$scenario == sc  &
-                                 myResults[[p]]$searchEffort == "high", ]
-        try(plot.violins2( dat.list = list(na.omit((temp$mean - temp$sim.N)/temp$sim.N)),
-                           x = sp + valNoise[sc],
-                           at = sp + valNoise[sc],
-                           add = T,
-                           col = myCols[sc],
-                           violin.width = 0.05,
-                           alpha = 0.9,
-                           border.col = myCols[sc],
-                           scale.width = F), silent = F)
-      }#sc
-    }#sp
-
-  
-  ## COEFFICIENT OF VARIATION
-    ylim <- 0.10
-    plot(1,1, xlim = c(0.5,3.5), ylim = c(0,ylim),
-         type = "n", xaxt = "n", main = "Coefficient of variation",
-         ylab = "CV(N)", xlab = "", axes = F)
-    axis(1, at = 1:3, labels = c("Chamois","Red Deer", "Wild boar"))
-    axis(2,
-         at = seq(0,ylim,length.out = 5),
-         labels = seq(0,ylim,length.out = 5))
-    # polygon(x = c(1.5,1.5,2.5,2.5),
-    #         y = c(-(ylim+1),ylim+1,ylim+1,-(ylim+1)),
-    #         border = F, col = adjustcolor("gray80", alpha.f = 0.2))
-    abline(v = 1.5, lty = 2, lwd = 1)
-    abline(v = 2.5, lty = 2, lwd = 1)
-    for(sp in 1:length(species)){
-      for(sc in scenarios){
-        temp <- myResults[[p]][myResults[[p]]$species == species[sp] &
-                                 myResults[[p]]$scenario == sc &
-                                 myResults[[p]]$searchEffort == "high",  ]
-        try(plot.violins2( dat.list = list(na.omit(temp$CV)),
-                           x = sp + valNoise[sc],
-                           at = sp + valNoise[sc],
-                           add = T,
-                           col = myCols[sc],
-                           violin.width = 0.05,
-                           alpha = 0.9,
-                           border.col = myCols[sc],
-                           scale.width = F), silent = F)
-      }#sc
-    }#sp
-
-  
-  ## COVERAGE
-    ylim <- 1
-    plot(1,1, xlim = c(0.5,3.5), ylim = c(0,ylim),
-         type = "n", xaxt = "n", main = "Coverage",
-         ylab = "95%CI coverage", xlab = "", axes = F)
-    axis(1, at = 1:3, labels = c("Chamois","Red Deer", "Wild boar"))
-    axis(2,
-         at = seq(0,ylim,length.out = 5),
-         labels = seq(0,ylim,length.out = 5))
-    # polygon(x = c(1.5,1.5,2.5,2.5),
-    #         y = c(-(ylim+1),ylim+1,ylim+1,-(ylim+1)),
-    #         border = F, col = adjustcolor("gray80", alpha.f = 0.2))
-    abline(h = 0.95, lty = 2, lwd = 2)
-    abline(v = 1.5, lty = 2, lwd = 1)
-    abline(v = 2.5, lty = 2, lwd = 1)
-    for(sp in 1:length(species)){
-      for(sc in scenarios){
-        temp <- myResults[[p]][myResults[[p]]$species == species[sp] &
-                                 myResults[[p]]$scenario == sc &
-                                 myResults[[p]]$searchEffort == "high", ]
-        
-        coverage <- mean(temp$lci <= temp$sim.N & temp$uci >= temp$sim.N, na.rm =T)
-        try(points( y = coverage,
-                    x = sp + valNoise[sc],
-                    pch = 21, cex = 2,
-                    bg = colors[sc],
-                    col = myCols[sc]), silent = F)
-      }#sc
-    }#sp
-  legend(x = 0.5, y = 0.6,
-         legend = c("m0", "G", "H", "GH", "A", "GA", "HA", "GHA"),
-         fill = colors)
-  
-  graphics.off()
-}
-
-## PLOTS Sex Ratio
-{ 
-  graphics.off()
-  pdf(file = file.path(WD, "SIMULATIONS/figure_SR.pdf"), 
-      width = 10, height = 3.5)
-  
-  species <- unique(parm.df$species)
-  scenarios <- 1:8
-  valNoise <- seq(-0.35,0.35, length.out = 8)
-  par(mfrow = c(1,3))
-  
-  ## RELATIVE BIAS
-    ylim <- 0.5
-    plot(1,1, xlim = c(0.5,3.5), ylim = c(-ylim,ylim),
-         type = "n", xaxt = "n", main = "Relative bias",
-         ylab = "RB(Sex Ratio)", xlab = "", axes = F)
-    axis(1, at = 1:3, labels = c("Chamois","Red Deer", "Wild boar"))
-    axis(2,
-         at = seq(-ylim,ylim,length.out = 5),
-         labels = seq(-ylim,ylim,length.out = 5))
-    # polygon(x = c(1.5,1.5,2.5,2.5),
-    #         y = c(-ylim,ylim,ylim,-ylim),
-    #         border = F, col = adjustcolor("gray80", alpha.f = 0.1))
-    abline(h = 0, lty = 2, lwd = 2)
-    abline(v = 1.5, lty = 2, lwd = 1)
-    abline(v = 2.5, lty = 2, lwd = 1)
-    p <- 3
-    for(sp in 1:length(species)){
-      for(sc in scenarios){
-        temp <- myResults[[p]][myResults[[p]]$species == species[sp] &
-                                 myResults[[p]]$scenario == sc  &
-                                 myResults[[p]]$searchEffort == "high", ]
-        try(plot.violins2( dat.list = list(na.omit((temp$mean - temp$sim.SR)/temp$sim.SR)),
-                           x = sp + valNoise[sc],
-                           at = sp + valNoise[sc],
-                           add = T,
-                           col = myCols[sc],
-                           violin.width = 0.05,
-                           alpha = 0.9,
-                           border.col = myCols[sc],
-                           scale.width = F), silent = F)
-      }#sc
-    }#sp
-  
-  
-  ## COEFFICIENT OF VARIATION
-    ylim <- 0.10
-    plot(1,1, xlim = c(0.5,3.5), ylim = c(0,ylim),
-         type = "n", xaxt = "n", main = "Coefficient of variation",
-         ylab = "CV(Sex Ratio)", xlab = "", axes = F)
-    axis(1, at = 1:3, labels = c("Chamois","Red Deer", "Wild boar"))
-    axis(2,
-         at = seq(0,ylim,length.out = 5),
-         labels = seq(0,ylim,length.out = 5))
-    # polygon(x = c(1.5,1.5,2.5,2.5),
-    #         y = c(-ylim,ylim,ylim,-ylim),
-    #         border = F, col = adjustcolor("gray80", alpha.f = 0.1))
-    abline(v = 1.5, lty = 2, lwd = 1)
-    abline(v = 2.5, lty = 2, lwd = 1)
-    for(sp in 1:length(species)){
-      for(sc in scenarios){
-        temp <- myResults[[p]][myResults[[p]]$species == species[sp] &
-                                 myResults[[p]]$scenario == sc &
-                                 myResults[[p]]$searchEffort == "high",  ]
-        try(plot.violins2( dat.list = list(na.omit(temp$CV)),
-                           x = sp + valNoise[sc],
-                           at = sp + valNoise[sc],
-                           add = T,
-                           col = myCols[sc],
-                           violin.width = 0.05,
-                           alpha = 0.9,
-                           border.col = myCols[sc],
-                           scale.width = F), silent = F)
-      }#sc
-    }#sp
-
-  
-  ## COVERAGE
-    ylim <- 1
-    plot(1,1, xlim = c(0.5,3.5), ylim = c(0,ylim),
-         type = "n", xaxt = "n", main = "Coverage",
-         ylab = "95%CI coverage", xlab = "", axes = F)
-    axis(1, at = 1:3, labels = c("Chamois","Red Deer", "Wild boar"))
-    axis(2,
-         at = seq(0,ylim,length.out = 5),
-         labels = seq(0,ylim,length.out = 5))
-    # polygon(x = c(1.5,1.5,2.5,2.5),
-    #         y = c(-ylim,ylim,ylim,-ylim),
-    #         border = F, col = adjustcolor("gray80", alpha.f = 0.1))
-    abline(h = 0.95, lty = 2, lwd = 2)
-    abline(v = 1.5, lty = 2, lwd = 1)
-    abline(v = 2.5, lty = 2, lwd = 1)
-    for(sp in 1:length(species)){
-      for(sc in scenarios){
-        temp <- myResults[[p]][myResults[[p]]$species == species[sp] &
-                                 myResults[[p]]$scenario == sc &
-                                 myResults[[p]]$searchEffort == "high", ]
-        
-        coverage <- mean(temp$lci <= temp$sim.SR & temp$uci >= temp$sim.SR, na.rm = T)
-        try(points( y = coverage,
-                    x = sp + valNoise[sc],
-                    pch = 21, cex = 2,
-                    bg = colors[sc],
-                    col = myCols[sc]), silent = F)
-      }#sc
-    }#sp
-  legend(x = 0.5, y = 0.6,
-         legend = c("m0", "G", "H", "GH", "A", "GA", "HA", "GHA"),
-         fill = colors)
-  
-  graphics.off()
-}
 ## -----------------------------------------------------------------------------

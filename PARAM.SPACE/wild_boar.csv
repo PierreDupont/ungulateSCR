@@ -1,0 +1,4 @@
+groupClasses,groupName,groupProp,min_GS,mean_GS,max_GS,prop_1,prop_2,prop_3,sex_1,sex_2,sex_3,sigma_1,sigma_2,sigma_3,p0_1,p0_2,p0_3
+group 1,females_plus_juv,0.55,2,4,30,0.6,0.2,0.2,f,f,m,700,700,700,0.06,0.01,0.01
+group 2,male_yearlings,0.25,1,1,1,1,0,0,m,NA,NA,800,NA,NA,0.01,NA,NA
+group 3,male_adults,0.2,2,5,10,1,0,0,m,NA,NA,650,NA,NA,0.03,NA,NA

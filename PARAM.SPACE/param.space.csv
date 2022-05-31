@@ -1,0 +1,4 @@
+species,site,D,habitatFile,detectorFile
+chamois,Hainich,3.9,StudyArea.shp,Transekte_100m.shp
+red_deer,Hainich,2.9,StudyArea.shp,Transekte_100m.shp
+wild_boar,Hainich,11.7,StudyArea.shp,Transekte_100m.shp
