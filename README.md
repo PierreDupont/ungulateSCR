@@ -1,5 +1,4 @@
-# ungulateSCR
-
+# ungulateSCR [![DOI](https://zenodo.org/badge/498290095.svg)](https://doi.org/10.5281/zenodo.7539837)
 This repository contains R and NIMBLE scripts associated with the article "An evaluation of spatial capture-recapture models applied to ungulate non-invasive genetic sampling data" by [Pierre Dupont](https://www.researchgate.net/profile/Pierre-Dupont-6), [Richard Bischof](https://www.researchgate.net/profile/Richard-Bischof-2), [Cyril Milleret](https://www.researchgate.net/profile/Cyril-Milleret), Wibke Peters, Hendrik Edelhoff, Cornalia Ebert, Alisa Klamm and Ulf Hohmann published in the Journal of Wildlife Management:
 
 
